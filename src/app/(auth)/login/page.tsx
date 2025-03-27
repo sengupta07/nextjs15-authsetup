@@ -1,31 +1,49 @@
 "use client";
 
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { useForm, SubmitHandler } from "react-hook-form";
-import { useRouter } from "next/navigation";
-import { setAuthCookie } from "@/lib/auth";
 import { TextLoader } from "@/app/common/components/Loader";
+import ResizablePanel from "@/app/common/components/ResizablePanel";
+import { setAuthCookie } from "@/lib/auth";
+import router from "next/router";
 
 type LoginInputs = {
   username: string;
   password: string;
 };
 
+type RequestAccessInputs = {
+  email: string;
+};
+
+type UniversalErrorState = {
+  type: "login" | "access";
+  message: string;
+};
+
 export default function LoginPage() {
-  const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
+  const [universalError, setUniversalError] =
+    useState<UniversalErrorState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showRequestAccess, setShowRequestAccess] = useState(false);
 
   const {
-    register,
-    handleSubmit,
-    formState: { errors },
+    register: registerLogin,
+    handleSubmit: handleLoginSubmit,
+    formState: { errors: loginErrors },
   } = useForm<LoginInputs>();
 
-  const onSubmit: SubmitHandler<LoginInputs> = async (data) => {
+  const {
+    register: registerAccess,
+    handleSubmit: handleAccessSubmit,
+    formState: { errors: accessErrors },
+    reset: resetAccessForm,
+  } = useForm<RequestAccessInputs>();
+
+  const onLoginSubmit: SubmitHandler<LoginInputs> = async (data) => {
     setIsLoading(true);
-    setError(null);
+    setUniversalError(null);
 
     try {
       const response = await fetch("https://dummyjson.com/auth/login", {
@@ -38,23 +56,66 @@ export default function LoginPage() {
 
       if (response.ok) {
         const result = await response.json();
+        await new Promise((resolve) => setTimeout(resolve, 1000));
         setAuthCookie(result.accessToken);
-
-        // Simulate a slight delay to show loading state
-        await new Promise((resolve) => setTimeout(resolve, 1000000));
-
         router.push("/welcome");
       } else {
         const errorData = await response.json();
-        setError(errorData.message || "Login failed");
+        setUniversalError({
+          type: "login",
+          message: errorData.message || "Login failed",
+        });
       }
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "An unknown error occurred"
-      );
+      setUniversalError({
+        type: "login",
+        message:
+          err instanceof Error ? err.message : "An unknown error occurred",
+      });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const onAccessRequestSubmit: SubmitHandler<RequestAccessInputs> = async (
+    data
+  ) => {
+    setIsLoading(true);
+    setUniversalError(null);
+
+    try {
+      const response = await fetch("https://dummyjson.com/api/request-access", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (response.ok) {
+        resetAccessForm();
+        router.push("/access-requested");
+      } else {
+        const errorData = await response.json();
+        setUniversalError({
+          type: "access",
+          message: errorData.message || "Failed to send access request",
+        });
+      }
+    } catch (err) {
+      setUniversalError({
+        type: "access",
+        message:
+          err instanceof Error ? err.message : "An unknown error occurred",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const toggleRequestAccess = () => {
+    setShowRequestAccess(!showRequestAccess);
+    setUniversalError(null);
   };
 
   return (
@@ -73,7 +134,7 @@ export default function LoginPage() {
         exit={{ opacity: 0 }}
         className="min-h-screen flex items-center justify-center bg-gray-900 text-gray-900"
       >
-        <motion.form
+        <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{
@@ -81,8 +142,7 @@ export default function LoginPage() {
             stiffness: 300,
             damping: 20,
           }}
-          onSubmit={handleSubmit(onSubmit)}
-          className="bg-white p-8 rounded-xl shadow-md w-96"
+          className="bg-white overflow-hidden p-8 space-y-4 rounded-xl shadow-md w-96"
         >
           <motion.h2
             initial={{ y: -20, opacity: 0 }}
@@ -92,122 +152,206 @@ export default function LoginPage() {
             Login
           </motion.h2>
 
-          <AnimatePresence>
-            {error && (
+          {/* Universal Error Handling */}
+          <ResizablePanel>
+            {universalError && (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="bg-red-100 text-red-700 p-3 rounded mb-4 overflow-hidden"
+                key="universal-error"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className={`
+                  p-3 rounded mb-4 
+                  ${
+                    universalError.type === "login"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-red-100 text-red-700"
+                  }
+                `}
               >
-                {error}
+                {universalError.message}
               </motion.div>
             )}
-          </AnimatePresence>
+          </ResizablePanel>
 
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.1 }}
-            className="mb-4"
-          >
-            <label htmlFor="username" className="block mb-2 text-sm">
-              Username
-            </label>
-            <motion.input
-              whileFocus={{
-                scale: 1.02,
-                boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.5)",
-              }}
-              id="username"
-              type="text"
-              {...register("username", {
-                required: "Username is required",
-              })}
-              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <AnimatePresence>
-              {errors.username && (
-                <motion.p
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="text-red-500 text-sm mt-1"
-                >
-                  {errors.username.message}
-                </motion.p>
-              )}
-            </AnimatePresence>
-          </motion.div>
+          {/* Login Form */}
+          <form onSubmit={handleLoginSubmit(onLoginSubmit)}>
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+              className="mb-4"
+            >
+              <label htmlFor="username" className="block mb-2 text-sm">
+                Username
+              </label>
+              <motion.input
+                whileFocus={{
+                  scale: 1.02,
+                  boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.5)",
+                }}
+                id="username"
+                type="text"
+                {...registerLogin("username", {
+                  required: "Username is required",
+                })}
+                className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <ResizablePanel>
+                {loginErrors.username && (
+                  <motion.p
+                    key="username-error"
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.3 }}
+                    className="text-red-500 text-sm mt-1"
+                  >
+                    {loginErrors.username.message}
+                  </motion.p>
+                )}
+              </ResizablePanel>
+            </motion.div>
 
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            className="mb-6"
-          >
-            <label htmlFor="password" className="block mb-2 text-sm">
-              Password
-            </label>
-            <motion.input
-              whileFocus={{
-                scale: 1.02,
-                boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.5)",
-              }}
-              id="password"
-              type="password"
-              {...register("password", {
-                required: "Password is required",
-                minLength: {
-                  value: 6,
-                  message: "Password must be at least 6 characters",
-                },
-              })}
-              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <AnimatePresence>
-              {errors.password && (
-                <motion.p
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="text-red-500 text-sm mt-1"
-                >
-                  {errors.password.message}
-                </motion.p>
-              )}
-            </AnimatePresence>
-          </motion.div>
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="mb-6"
+            >
+              <label htmlFor="password" className="block mb-2 text-sm">
+                Password
+              </label>
+              <motion.input
+                whileFocus={{
+                  scale: 1.02,
+                  boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.5)",
+                }}
+                id="password"
+                type="password"
+                {...registerLogin("password", {
+                  required: "Password is required",
+                  minLength: {
+                    value: 6,
+                    message: "Password must be at least 6 characters",
+                  },
+                })}
+                className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <ResizablePanel>
+                {loginErrors.password && (
+                  <motion.p
+                    key="password-error"
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.3 }}
+                    className="text-red-500 text-sm mt-1"
+                  >
+                    {loginErrors.password.message}
+                  </motion.p>
+                )}
+              </ResizablePanel>
+            </motion.div>
 
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            type="submit"
-            disabled={isLoading}
-            className={`w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600 transition duration-300 ${
-              isLoading ? "opacity-50 cursor-not-allowed" : ""
-            }`}
-          >
-            Login
-          </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              type="submit"
+              disabled={isLoading}
+              className={`w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600 transition duration-300 ${
+                isLoading ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+            >
+              Login
+            </motion.button>
+          </form>
 
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.3 }}
-            className="mt-4 text-center"
+            className="text-center"
           >
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               type="button"
-              onClick={() => router.push("/register")}
+              onClick={toggleRequestAccess}
               className="text-blue-500 hover:underline"
             >
-              Request Temporary Access
+              {showRequestAccess ? "Cancel" : "Request Temporary Access"}
             </motion.button>
           </motion.div>
-        </motion.form>
+
+          <ResizablePanel>
+            {showRequestAccess && (
+              <motion.div
+                key="request-access"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <form onSubmit={handleAccessSubmit(onAccessRequestSubmit)}>
+                  <motion.div
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: 0.1 }}
+                    className="mb-6"
+                  >
+                    <label htmlFor="email" className="block mb-2 text-sm">
+                      Email
+                    </label>
+                    <motion.input
+                      whileFocus={{
+                        scale: 1.02,
+                        boxShadow: "0 0 0 3px rgba(59, 130, 246, 0.5)",
+                      }}
+                      id="email"
+                      type="email"
+                      {...registerAccess("email", {
+                        required: "Email is required",
+                        pattern: {
+                          value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                          message: "Invalid email address",
+                        },
+                      })}
+                      className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <ResizablePanel>
+                      {accessErrors.email && (
+                        <motion.p
+                          key="email-error"
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          transition={{ duration: 0.3 }}
+                          className="text-red-500 text-sm mt-1"
+                        >
+                          {accessErrors.email.message}
+                        </motion.p>
+                      )}
+                    </ResizablePanel>
+                  </motion.div>
+
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    type="submit"
+                    disabled={isLoading}
+                    className={`w-full bg-green-500 text-white p-2 rounded hover:bg-green-600 transition duration-300 ${
+                      isLoading ? "opacity-50 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    Request Access
+                  </motion.button>
+                </form>
+              </motion.div>
+            )}
+          </ResizablePanel>
+        </motion.div>
       </motion.div>
     </>
   );
